@@ -1,0 +1,123 @@
+# Energy-Constrained Tipping Cascades Research Project
+# .gitignore
+
+# =============================================================================
+# Large Data Files (simulation outputs, checkpoints)
+# =============================================================================
+data/outputs/*.nc
+data/outputs/*.h5
+data/outputs/*.hdf5
+data/outputs/*.zarr/
+data/raw/*.nc
+data/raw/*.csv
+data/processed/*.nc
+data/processed/*.pkl
+checkpoints/*.pkl
+checkpoints/*.pt
+checkpoints/*.ckpt
+
+# Ignore large data but keep directory structure
+data/outputs/.gitkeep
+data/raw/.gitkeep
+data/processed/.gitkeep
+checkpoints/.gitkeep
+
+# =============================================================================
+# Python
+# =============================================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv/
+
+# =============================================================================
+# Jupyter Notebooks
+# =============================================================================
+.ipynb_checkpoints/
+*.ipynb_checkpoints/
+
+# Notebook outputs (optional - uncomment to ignore)
+# notebooks/*.html
+
+# =============================================================================
+# IDE and Editor
+# =============================================================================
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.settings/
+
+# =============================================================================
+# OS Generated
+# =============================================================================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# =============================================================================
+# MLflow
+# =============================================================================
+mlruns/
+mlflow.db
+
+# =============================================================================
+# Testing
+# =============================================================================
+.coverage
+.pytest_cache/
+htmlcov/
+.tox/
+.nox/
+
+# =============================================================================
+# Secrets and Credentials (never commit)
+# =============================================================================
+*.env
+.env.local
+.env.*.local
+secrets/
+credentials/
+*.pem
+*.key
+
+# =============================================================================
+# Build artifacts
+# =============================================================================
+*.log
+*.tmp
+*.temp
+
+# =============================================================================
+# Container build artifacts (keep Dockerfile, ignore build cache)
+# =============================================================================
+.docker/
