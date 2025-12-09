@@ -1,0 +1,87 @@
+# Energy-Constrained Tipping Cascades - Dask Worker Image
+# Lightweight image for simulation workers (no JupyterLab)
+FROM nvidia/cuda:12.1.0-runtime-ubuntu22.04
+
+LABEL maintainer="Jason Holt"
+LABEL project="tipping-cascades-research"
+LABEL description="Dask worker for cascade simulations"
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=America/Chicago
+
+# Minimal system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
+    wget \
+    git \
+    ca-certificates \
+    libgomp1 \
+    libgeos-dev \
+    libhdf5-dev \
+    libnetcdf-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Miniforge (conda-forge default, includes mamba, no Anaconda ToS issues)
+ENV CONDA_DIR=/opt/conda
+RUN wget -q https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh -O /tmp/miniforge.sh && \
+    bash /tmp/miniforge.sh -b -p $CONDA_DIR && \
+    rm /tmp/miniforge.sh
+ENV PATH=$CONDA_DIR/bin:$PATH
+
+# Create environment
+RUN mamba create -n worker python=3.9 -y && mamba clean -afy
+ENV CONDA_DEFAULT_ENV=worker
+ENV PATH=$CONDA_DIR/envs/worker/bin:$PATH
+
+# Install core scientific stack (minimal for workers)
+# Pin versions to match JupyterLab client
+RUN mamba install -n worker -c conda-forge \
+    numpy=1.26.3 \
+    scipy \
+    numba \
+    networkx \
+    netCDF4 \
+    h5py \
+    xarray \
+    dask=2024.1.0 \
+    distributed=2024.1.0 \
+    cloudpickle=3.0.0 \
+    lz4=4.3.3 \
+    msgpack-python=1.0.7 \
+    toolz=0.12.0 \
+    tornado=6.3.3 \
+    pandas=2.1.4 \
+    -y && conda clean -afy
+
+# Optional GPU support
+RUN mamba install -n worker -c conda-forge cupy -y || echo "CuPy skipped"
+
+# Install PyCascades dependencies
+RUN pip install --no-cache-dir \
+    sdeint \
+    SALib \
+    pyDOE \
+    mlflow \
+    redis \
+    tqdm
+
+# Clone and install PyCascades
+WORKDIR /opt/research
+RUN git clone https://github.com/pik-copan/pycascades.git && \
+    cd pycascades && pip install -e .
+
+# Working directory
+RUN mkdir -p /workspace
+WORKDIR /workspace
+
+# Environment
+ENV PYTHONUNBUFFERED=1
+ENV NUMBA_CACHE_DIR=/tmp/numba_cache
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
+    CMD python -c "import dask.distributed; print('healthy')" || exit 1
+
+# Default: Dask worker (scheduler address provided via env)
+CMD ["dask-worker", "--no-dashboard"]
