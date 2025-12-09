@@ -26,6 +26,19 @@ checkpoints/*.pkl
 checkpoints/*.pt
 checkpoints/*.ckpt
 
+# =============================================================================
+# Amazon moisture recycling data (download from Figshare)
+# =============================================================================
+# NetCDF files (large binary data)
+data/amazon/**/*.nc
+# Zip archives
+data/amazon/*.zip
+# Ensemble member directories (download separately)
+data/amazon/amazon_adaptation_model/ensemble_prob_m*/
+# Keep READMEs and documentation
+!data/amazon/README.md
+!data/amazon/amazon_adaptation_model/Readme.txt
+
 # Ignore large data but keep directory structure
 data/outputs/.gitkeep
 data/raw/.gitkeep
