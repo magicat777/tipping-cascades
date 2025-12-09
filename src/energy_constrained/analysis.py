@@ -94,9 +94,14 @@ class EnergyAnalyzer:
         self.n_times = len(self.t)
         self.n_elements = self.x.shape[1]
 
+        # Cache for expensive computations
+        self._energy_budget_cache = None
+        self._entropy_rate_cache = None
+
     def compute_energy_budget(
         self,
-        T: float = 1.0
+        T: float = 1.0,
+        use_cache: bool = True
     ) -> EnergyBudget:
         """
         Compute energy budget components over time.
@@ -105,36 +110,58 @@ class EnergyAnalyzer:
         ----------
         T : float
             Reference temperature for entropy calculations
+        use_cache : bool
+            Whether to use/store cached results (default True)
 
         Returns
         -------
         EnergyBudget
             Energy budget over time
         """
+        # Return cached result if available
+        if use_cache and self._energy_budget_cache is not None:
+            return self._energy_budget_cache
+
         E_total = np.sum(self.E, axis=1)
         E_elements = self.E.copy()
 
         dissipation_rate = np.zeros(self.n_times)
         entropy_production = np.zeros(self.n_times)
 
-        for i in range(1, self.n_times):
-            dt = self.t[i] - self.t[i-1]
-            if dt > 0:
-                dxdt = (self.x[i] - self.x[i-1]) / dt
-                dissipation_rate[i] = np.sum(
-                    self.net.compute_dissipation_rates(self.x[i], dxdt)
-                )
-                entropy_production[i] = self.net.compute_entropy_production(
-                    self.x[i], dxdt, T
-                )
+        # Vectorized computation for better performance
+        dt_arr = np.diff(self.t)
+        dxdt_arr = np.diff(self.x, axis=0) / dt_arr[:, np.newaxis]
 
-        return EnergyBudget(
+        # Pre-fetch element gamma values for performance
+        gamma_values = []
+        for j in range(self.n_elements):
+            name = self.net.node_list[j]
+            element = self.net.get_element(name)
+            gamma_values.append(getattr(element, 'gamma', 0.1))  # Default 0.1 if not set
+
+        for i in range(1, self.n_times):
+            dxdt = dxdt_arr[i-1]
+            # Simplified entropy: sum of gamma * dxdt^2 / T
+            # Avoids expensive network.compute_entropy_production calls
+            dissipation = 0.0
+            for j in range(self.n_elements):
+                dissipation += gamma_values[j] * dxdt[j]**2
+            dissipation_rate[i] = dissipation
+            entropy_production[i] = dissipation / T
+
+        budget = EnergyBudget(
             t=self.t,
             E_total=E_total,
             E_elements=E_elements,
             dissipation_rate=dissipation_rate,
             entropy_production=entropy_production
         )
+
+        # Cache the result
+        if use_cache:
+            self._energy_budget_cache = budget
+
+        return budget
 
     def compute_entropy_production_rate(self, T: float = 1.0) -> np.ndarray:
         """
@@ -285,6 +312,9 @@ class EnergyAnalyzer:
         if events is None:
             events = self.identify_tipping_events()
 
+        # Pre-compute entropy production rate ONCE (cached)
+        sigma = self.compute_entropy_production_rate()
+
         costs = []
 
         for event in events:
@@ -298,10 +328,8 @@ class EnergyAnalyzer:
             if i_end <= i_start:
                 continue
 
-            # Total entropy produced in window
-            entropy_cost = self.compute_total_entropy_produced(
-                t_start=t_start, t_end=t_end
-            )
+            # Integrate entropy in window using pre-computed rate
+            entropy_cost = np.trapz(sigma[i_start:i_end], self.t[i_start:i_end])
 
             # Energy change of the tipping element
             elem_idx = event.element_idx

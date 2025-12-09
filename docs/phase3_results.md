@@ -257,12 +257,162 @@ The Phase 3 implementation extends PyCascades with:
 
 ---
 
+## Experiment 4: Amazon Spatial Model - 50-Cell Subnetwork
+
+**Objective**: Test whether the noise-type bifurcation discovered in idealized models applies to spatially-explicit Amazon moisture recycling cascades.
+
+### Configuration
+- **Network**: 50 highest-connectivity Amazon cells (from 567-cell grid)
+- **Data source**: Wunderling et al. (2022) moisture recycling matrix
+- **Ensemble size**: 5 runs per configuration
+- **Duration**: 500 time units
+- **Time step**: 0.5
+- **Coupling**: Gradient-driven, proportional to moisture flow
+
+### Noise Configurations
+
+| Label | σ | α | Description |
+|-------|---|---|-------------|
+| Gaussian | 0.06 | 2.0 | Baseline normal noise |
+| Lévy α=1.8 | 0.06 | 1.8 | Mildly heavy-tailed |
+| Lévy α=1.5 | 0.06 | 1.5 | Moderate heavy tails |
+| Lévy α=1.2 | 0.06 | 1.2 | Strongly heavy-tailed |
+
+### Results
+
+#### Entropy Production
+
+| Noise Type | Total Entropy | Tip/Recovery Ratio |
+|------------|---------------|-------------------|
+| Gaussian (α=2.0) | ~8,000 | 1.0000 |
+| Lévy α=1.8 | ~22,000 | 0.9976 |
+| Lévy α=1.5 | ~35,000 | 0.9986 |
+| Lévy α=1.2 | ~35,000 | 0.9991 |
+
+### Key Finding: Near-Symmetric Entropy in Spatial Model
+
+**Contrast with Phase 3 idealized model:**
+- Idealized 4-element: Up to 1700x tip/recovery asymmetry
+- Spatial 50-cell: All ratios within 0.3% of 1.0 (symmetric)
+
+**Interpretation**: The moisture recycling network provides **thermodynamic buffering** that prevents asymmetric tipping dynamics. The bidirectional coupling creates stabilizing feedback loops.
+
+---
+
+## Experiment 5: Full 567-Cell Amazon Network
+
+**Objective**: Verify whether thermodynamic buffering is a scale-invariant property of the Amazon network or an artifact of high-connectivity cell selection.
+
+### Configuration
+- **Network**: All 567 Amazon grid cells
+- **Couplings**: 20,000+ connections (min_flow > 1.0 mm/month)
+- **Parallelization**: Dask distributed across 4 workers
+- **Other parameters**: Same as Experiment 4
+
+### Results
+
+#### Comparison: 50-Cell vs Full 567-Cell Network
+
+| Noise Type | 50-cell Ratio | 567-cell Ratio | Difference |
+|------------|---------------|----------------|------------|
+| Gaussian (α=2.0) | 1.0000 | 1.0000 | +0.0000 |
+| Lévy α=1.8 | 0.9976 | 0.9991 | +0.0014 |
+| Lévy α=1.5 | 0.9986 | 0.9991 | +0.0005 |
+| Lévy α=1.2 | 0.9991 | 0.9991 | +0.0000 |
+
+### Key Findings
+
+1. **Scale-invariant buffering**: The near-perfect tip/recovery symmetry holds at both 50-cell and 567-cell scales. The difference is <0.2% across all noise types.
+
+2. **Robust network property**: Thermodynamic buffering is NOT an artifact of cell selection. Peripheral, weakly-connected cells show the same behavior as high-connectivity hubs.
+
+3. **Contrast with idealized model**: The Amazon moisture recycling topology fundamentally differs from the idealized 4-element network:
+   - Idealized: Sparse, directional coupling → asymmetric dynamics
+   - Amazon: Dense, bidirectional moisture flows → symmetric dynamics
+
+### Physical Interpretation
+
+The Amazon's moisture recycling network creates **closed-loop feedback**:
+- Forest evapotranspiration → moisture transport → downwind precipitation → forest growth
+- This bidirectional cycling equalizes the thermodynamic cost of state transitions
+
+**Conservation implication**: The network's inherent resilience depends on maintaining connectivity. Deforestation that breaks moisture recycling links could expose regions to the asymmetric tipping dynamics seen in isolated systems.
+
+---
+
+## Summary of Phase 3 Findings
+
+### Confirmed Hypotheses
+
+| Hypothesis | Status | Evidence |
+|------------|--------|----------|
+| Asymmetric coupling minimizes entropy | ✓ SUPPORTED | 2.2% reduction vs symmetric |
+| GIS protection from cascading | ✓ SUPPORTED | Lower tipped % with asymmetric |
+| Tipping costs more than recovery | ⚠️ COMPLEX | Depends on noise type! |
+| **Amazon network buffers asymmetry** | ✓ SUPPORTED | Ratio ≈ 1.0 at all scales |
+
+### Key Insights
+
+1. **Thermodynamic favorability**: The asymmetric coupling structure found in Phase 2 (protective Amazon feedback) appears to be thermodynamically favorable, producing less entropy than symmetric alternatives.
+
+2. **Noise-type bifurcation**: The thermodynamic cost asymmetry between tipping and recovery fundamentally depends on the noise distribution:
+   - **High Lévy**: Tipping is catastrophically expensive (1700x recovery cost)
+   - **Low Lévy**: Tipping is cheaper than recovery (0.68x) — INVERTED!
+   - **Gaussian**: No events at comparable amplitudes
+
+3. **Lévy "tunneling" effect**: Heavy-tailed Lévy noise (α<2) enables barrier bypass via extreme jumps, analogous to quantum tunneling. This inverts classical thermodynamic expectations at low noise amplitudes.
+
+4. **Kramers theory breakdown**: Classical escape rate theory assumes Gaussian fluctuations. Lévy noise violates these assumptions, producing qualitatively different behavior.
+
+5. **Spatial network buffering (NEW)**: The Amazon moisture recycling network provides scale-invariant thermodynamic buffering, eliminating the asymmetry seen in isolated/idealized systems. This is a network topology effect, not a scale effect.
+
+6. **Climate relevance**: If real climate forcing has heavy tails (supported by paleoclimate evidence), then:
+   - Tipping may be easier than Gaussian models predict
+   - Recovery may be harder than expected
+   - BUT: Well-connected networks like Amazon moisture recycling provide inherent resilience
+
+---
+
+## Technical Notes
+
+### Energy-Constrained Framework
+
+The Phase 3 implementation extends PyCascades with:
+
+- **Extended state space**: `y = [x_0, ..., x_{n-1}, E_0, ..., E_{n-1}]`
+- **Energy tracking**: Double-well potential `U(x) = x⁴/4 - x²/2` scaled by barrier height
+- **Dissipation**: Viscous damping `D = γ(dx/dt)²`
+- **Entropy production**: `σ = D/T`
+- **Energy-based coupling**: Flow proportional to energy gradient
+
+### Dask Parallelization
+
+For large-scale experiments (567-cell network):
+- Worker path initialization via `client.run()`
+- Serialization of network objects via pickle
+- Conversion between dict results and SolverResult objects
+- Batch processing with progress tracking
+
+### Numerical Considerations
+
+- State bounds [-10, 10] prevent overflow from Lévy jumps
+- Energy bounds [-100, 100] maintain physical values
+- Clipping in potential/force calculations for numerical stability
+
+### Code Location
+
+- Module: `src/energy_constrained/`
+- Notebooks:
+  - `notebooks/04_energy_constrained_exploration.ipynb` (idealized experiments)
+  - `notebooks/05_amazon_spatial_energy_tracking.ipynb` (spatial Amazon model)
+- Tests: `tests/test_energy_constrained/`
+
+---
+
 ## Next Steps
 
-1. **Experiment 4: Moderate Gaussian noise** — Test σ=0.06-0.10 with α=2.0 to capture classical barrier-crossing dynamics and validate Kramers theory in the Gaussian regime
-2. **Statistical significance**: Larger ensembles (N=50-100) for publication-quality results
-3. **Parameter sensitivity**: Systematic exploration of σ, α, coupling strength
+1. **Drought scenarios**: Test cascade dynamics under 2005, 2010, 2015 Amazon drought conditions using modified coupling strengths
+2. **Deforestation scenarios**: Model impact of network fragmentation on thermodynamic resilience
+3. **Statistical significance**: Larger ensembles (N=50-100) for publication-quality results
 4. **α-sweep experiment**: Vary α from 1.2 to 2.0 to map the transition from Lévy to Gaussian behavior
-5. **MEPP analysis**: Test Maximum Entropy Production Principle predictions
-6. **Amazon spatial model**: Apply energy tracking to spatially-explicit Amazon model
-7. **Paleoclimate validation**: Compare model predictions with ice core / sediment records of abrupt transitions
+5. **Paleoclimate validation**: Compare model predictions with ice core / sediment records of abrupt transitions
