@@ -409,10 +409,188 @@ For large-scale experiments (567-cell network):
 
 ---
 
+## Experiment 6: Drought Impact on Cascade Thermodynamics
+
+**Objective**: Test whether historical Amazon droughts (2005, 2010) alter cascade vulnerability and thermodynamic costs.
+
+### Configuration
+- **Data**: Wunderling et al. moisture recycling data for dry season (Jul-Sep)
+- **Years compared**: 2003 (normal), 2005 (drought), 2010 (severe drought)
+- **Network**: 50-cell subnetwork with year-specific barriers and coupling
+- **Noise**: Gaussian (α=2.0, σ=0.06)
+- **Ensemble**: 5 runs per condition
+
+### Drought Impact on Network Properties
+
+Droughts affect the network in two ways:
+1. **Lower barriers**: Reduced rainfall/evap ratio → more vulnerable elements
+2. **Weaker coupling**: Less moisture recycling → reduced network connectivity
+
+### Results: Gaussian Noise (No Cascades)
+
+| Condition | Total Entropy | Tipping Events | % Tipped |
+|-----------|---------------|----------------|----------|
+| 2003 (Normal) | 29.4 | 0 | 0% |
+| 2005 (Drought) | 23.7 | 0 | 0% |
+| 2010 (Severe) | 19.9 | 0 | 0% |
+
+### Key Finding: Drought Reduces Thermodynamic Activity
+
+- **No cascades triggered** under any condition with Gaussian noise
+- But entropy production **decreased** during drought:
+  - 2005: -19% vs 2003
+  - 2010: -32% vs 2003
+
+**Interpretation**: Drought weakens moisture recycling → less energy flows through network → less dissipation → less entropy production. The network becomes "quieter" but potentially more fragile.
+
+---
+
+## Experiment 7: Drought × Lévy Noise Interaction
+
+**Objective**: Test whether extreme events (Lévy noise) can trigger cascades under drought-weakened conditions, and whether there's a synergistic vulnerability effect.
+
+### Configuration
+- **Climate conditions**: 2003 (Normal) vs 2010 (Severe drought)
+- **Noise types**: Gaussian (α=2.0), Lévy α=1.5, Lévy α=1.2
+- **Other parameters**: Same as Experiment 6
+
+### Results
+
+| Configuration | Total Entropy | Tipping Events | % Time Tipped |
+|---------------|---------------|----------------|---------------|
+| 2003 + Gaussian | 29.4 | 0 | 0.0% |
+| 2003 + Lévy α=1.5 | 3,014,690 | 20,777 | 48.5% |
+| 2003 + Lévy α=1.2 | 3,244,371 | 22,232 | 49.9% |
+| 2010 + Gaussian | 19.9 | 0 | 0.0% |
+| 2010 + Lévy α=1.5 | 1,717,244 | 18,531 | 46.9% |
+| 2010 + Lévy α=1.2 | 2,130,717 | 21,893 | 49.6% |
+
+### Key Findings
+
+#### 1. Lévy Noise is the Critical Trigger
+
+The difference between Gaussian and Lévy is **5 orders of magnitude**:
+- Gaussian: ~20-30 entropy, 0% tipped
+- Lévy: ~2-3 million entropy, ~50% tipped
+
+**Conclusion**: Extreme events (heavy-tailed noise) completely dominate cascade behavior, regardless of climate condition.
+
+#### 2. Drought Reduces Entropy Even Under Cascading Conditions
+
+Even when cascades are triggered by Lévy noise:
+- Lévy α=1.5: 2010 drought produces **43% less entropy** than 2003 normal
+- Lévy α=1.2: 2010 drought produces **34% less entropy** than 2003 normal
+
+The pattern from Experiment 6 persists: weaker network = less thermodynamic activity.
+
+#### 3. No Synergistic Vulnerability
+
+We hypothesized drought + Lévy might produce worse outcomes than either alone. Instead:
+- Both conditions reach ~50% tipped under Lévy noise
+- Drought actually has **fewer tipping events** (18.5K vs 21K at α=1.5)
+- Weaker coupling = cascades propagate less efficiently
+
+### Physical Interpretation
+
+```
+Lévy noise → Extreme jumps bypass barriers → Cascades trigger regardless of climate
+
+Drought → Weaker moisture recycling →
+   ├── Fewer cascade pathways (slightly protective in propagation)
+   └── Less recovery support (dangerous for permanence of tipped state)
+   └── Less overall thermodynamic activity
+```
+
+### Implications for Amazon Tipping
+
+1. **Extreme events dominate**: A single extreme fire season or heat wave (Lévy-like forcing) can trigger cascades that normal climate variability (Gaussian) cannot, regardless of drought status.
+
+2. **Drought is a secondary modifier**: It doesn't prevent cascades under extreme forcing, but changes their thermodynamic character—the system is "quieter" overall.
+
+3. **The "quieter" drought network** may trap cells in tipped states longer because reduced coupling provides less recovery support from neighboring cells.
+
+4. **Conservation priority**: Preventing extreme forcing events (fires, deforestation shocks) is more critical than drought mitigation for cascade prevention, but maintaining network connectivity is essential for recovery.
+
+---
+
+## Summary of Phase 3 Findings
+
+### Confirmed Hypotheses
+
+| Hypothesis | Status | Evidence |
+|------------|--------|----------|
+| Asymmetric coupling minimizes entropy | ✓ SUPPORTED | 2.2% reduction vs symmetric |
+| GIS protection from cascading | ✓ SUPPORTED | Lower tipped % with asymmetric |
+| Tipping costs more than recovery | ⚠️ COMPLEX | Depends on noise type! |
+| Amazon network buffers asymmetry | ✓ SUPPORTED | Ratio ≈ 1.0 at all scales |
+| **Drought increases vulnerability** | ⚠️ COMPLEX | Reduces activity, not triggers cascades |
+| **Extreme events trigger cascades** | ✓ SUPPORTED | Lévy >> Gaussian by 5 orders of magnitude |
+
+### Key Insights
+
+1. **Thermodynamic favorability**: The asymmetric coupling structure found in Phase 2 (protective Amazon feedback) appears to be thermodynamically favorable, producing less entropy than symmetric alternatives.
+
+2. **Noise-type bifurcation**: The thermodynamic cost asymmetry between tipping and recovery fundamentally depends on the noise distribution:
+   - **High Lévy**: Tipping is catastrophically expensive (1700x recovery cost)
+   - **Low Lévy**: Tipping is cheaper than recovery (0.68x) — INVERTED!
+   - **Gaussian**: No events at comparable amplitudes
+
+3. **Lévy "tunneling" effect**: Heavy-tailed Lévy noise (α<2) enables barrier bypass via extreme jumps, analogous to quantum tunneling. This inverts classical thermodynamic expectations at low noise amplitudes.
+
+4. **Kramers theory breakdown**: Classical escape rate theory assumes Gaussian fluctuations. Lévy noise violates these assumptions, producing qualitatively different behavior.
+
+5. **Spatial network buffering**: The Amazon moisture recycling network provides scale-invariant thermodynamic buffering, eliminating the asymmetry seen in isolated/idealized systems. This is a network topology effect, not a scale effect.
+
+6. **Extreme events dominate drought** (NEW): Lévy noise triggers cascades (~50% tipped) regardless of climate condition. Drought modifies thermodynamic activity (-32% to -43% entropy) but doesn't fundamentally change cascade occurrence.
+
+7. **Climate relevance**: If real climate forcing has heavy tails (supported by paleoclimate evidence), then:
+   - Tipping may be easier than Gaussian models predict
+   - Recovery may be harder than expected
+   - BUT: Well-connected networks like Amazon moisture recycling provide inherent resilience
+   - Extreme events (fires, heat waves) are the critical trigger, not gradual drought
+
+---
+
+## Technical Notes
+
+### Energy-Constrained Framework
+
+The Phase 3 implementation extends PyCascades with:
+
+- **Extended state space**: `y = [x_0, ..., x_{n-1}, E_0, ..., E_{n-1}]`
+- **Energy tracking**: Double-well potential `U(x) = x⁴/4 - x²/2` scaled by barrier height
+- **Dissipation**: Viscous damping `D = γ(dx/dt)²`
+- **Entropy production**: `σ = D/T`
+- **Energy-based coupling**: Flow proportional to energy gradient
+
+### Dask Parallelization
+
+For large-scale experiments (567-cell network):
+- Worker path initialization via `client.run()`
+- Serialization of network objects via pickle
+- Conversion between dict results and SolverResult objects
+- Batch processing with progress tracking
+
+### Numerical Considerations
+
+- State bounds [-10, 10] prevent overflow from Lévy jumps
+- Energy bounds [-100, 100] maintain physical values
+- Clipping in potential/force calculations for numerical stability
+
+### Code Location
+
+- Module: `src/energy_constrained/`
+- Notebooks:
+  - `notebooks/04_energy_constrained_exploration.ipynb` (idealized experiments)
+  - `notebooks/05_amazon_spatial_energy_tracking.ipynb` (spatial Amazon model)
+- Tests: `tests/test_energy_constrained/`
+
+---
+
 ## Next Steps
 
-1. **Drought scenarios**: Test cascade dynamics under 2005, 2010, 2015 Amazon drought conditions using modified coupling strengths
-2. **Deforestation scenarios**: Model impact of network fragmentation on thermodynamic resilience
-3. **Statistical significance**: Larger ensembles (N=50-100) for publication-quality results
-4. **α-sweep experiment**: Vary α from 1.2 to 2.0 to map the transition from Lévy to Gaussian behavior
-5. **Paleoclimate validation**: Compare model predictions with ice core / sediment records of abrupt transitions
+1. **Deforestation scenarios**: Model impact of network fragmentation on thermodynamic resilience
+2. **Statistical significance**: Larger ensembles (N=50-100) for publication-quality results
+3. **α-sweep experiment**: Vary α from 1.2 to 2.0 to map the transition from Lévy to Gaussian behavior
+4. **Paleoclimate validation**: Compare model predictions with ice core / sediment records of abrupt transitions
+5. **Recovery dynamics**: Study how drought-weakened networks recover (or fail to recover) after cascades
