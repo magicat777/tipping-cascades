@@ -2,117 +2,176 @@
 
 **Researcher:** Jason Holt
 **Started:** December 2025
-**Status:** Phase 2 Complete, Ready for Phase 3
+**Status:** Phase 4 In Progress - Network Resilience & Recovery Dynamics
 
 ## Project Overview
 
-Investigating how energy constraints and thermodynamic principles affect tipping cascade dynamics in climate systems, using the PyCascades framework from PIK.
+Investigating how energy constraints and thermodynamic principles affect tipping cascade dynamics in climate systems, with a focus on **Amazon rainforest resilience**. This research explores how network fragmentation from deforestation creates asymmetric dynamics where ecosystem degradation becomes progressively easier than recovery.
+
+### Key Research Questions
+
+1. **Does network fragmentation create tipping asymmetry?** ✅ **YES** - Confirmed in Phase 4
+2. **Can passive recovery occur under normal climate variability?** Testing in progress
+3. **What level of active intervention is required for restoration?** Testing in progress
+4. **Which network connections are critical for resilience?** Planned
+
+---
+
+## Major Findings
+
+### Phase 4: Network Fragmentation Creates "One-Way Valve" Effect ⭐
+
+| Metric | Intact Network (100%) | Fragmented (10%) | Change |
+|--------|----------------------|------------------|--------|
+| Tip/Recovery Ratio | 1.005 | **1.148** | +14.3% |
+| Total Entropy | 11,633 | 406 | -96.5% |
+| Transitions/Run | 4,678 | 142 | -97% |
+
+**Key Discovery**: At 10% edge retention, tipping is **14.8% more likely than recovery**. This creates a self-reinforcing degradation loop where deforestation makes future recovery progressively harder.
+
+**Unexpected Finding**: Random fragmentation creates MORE asymmetry (17.4%) than targeted removal of high-betweenness edges (12.3%), suggesting critical recovery pathways may be distributed throughout the network.
+
+### Phase 3: Energy-Constrained Cusp Model
+
+- Developed `EnergyConstrainedCusp` elements with explicit potential landscapes
+- Implemented Lévy stable noise for extreme event modeling
+- Created `run_two_phase_experiment()` for cascade/recovery simulations
+- Discovered "noise-type bifurcation" in tipping thermodynamics
+
+### Phase 2: Coupling Asymmetry & Amazon Moisture Recycling
+
+- **Coupling asymmetry is protective**: Original Wunderling network design prevents Greenland Ice Sheet cascading
+- **Moisture recycling prevents tipping**: Interior forest moisture support saves 17% of edge cells at critical rainfall threshold
+- **Lévy vs Gaussian noise**: Fat-tailed noise (α<2) enables both extreme tipping AND recovery events
+
+---
 
 ## Current Progress
 
-### Completed
+### ✅ Completed
 
-- **Phase 0: Infrastructure Setup**
-  - K3s cluster with cascades namespace
-  - JupyterLab deployment (port 30888)
-  - MLflow experiment tracking (port 30505)
-  - Dask distributed computing (port 30787)
-  - Custom container image with PyCascades v1.0.2
+- **Phase 0**: K3s infrastructure with JupyterLab, MLflow, Dask (14 workers)
+- **Phase 1**: PyCascades framework analysis and documentation
+- **Phase 2**: Baseline reproduction, coupling asymmetry discovery
+- **Phase 3**: Energy-constrained module development
+- **Phase 4 Experiment 8**: Network fragmentation analysis ✅ **(validated Dec 12, 2025)**
 
-- **Phase 0.5: K3S Storage Migration**
-  - Migrated k3s data to dedicated LVM volume
-  - Freed 72GB on root partition
+### 🔄 In Progress
 
-- **Phase 1: Foundation**
-  - Cloned repositories: pycascades, pyunicorn, pycopancore
-  - Documented PyCascades architecture (`docs/pycascades_architecture.md`)
-  - Set up notebook workflow
+- **Experiment 10c**: Restoration forcing - can active intervention restore tipped ecosystems?
+- **Experiments 9, 10, 10b**: Pending re-validation with fixed solver
 
-- **Phase 2: Baseline Reproduction** ✓ Complete
-  - Ran example_network_tipping_cascades.ipynb
-  - Explored earth_sys_levy_stable_noise.ipynb extensively
-  - Documented findings in `notebooks/01_earth_system_tipping_exploration.ipynb`
-  - Completed asymmetric coupling analysis (`notebooks/02_asymmetric_coupling_exploration.ipynb`)
-  - Completed Amazon moisture recycling analysis (`notebooks/03_amazon_moisture_recycling.ipynb`)
-  - **Full conclusions documented in `docs/phase2_conclusions.md`**
+### 📋 Planned
 
-### Key Findings (Phase 2)
+- **Experiment 11**: Keystone edge identification
+- **Experiment 8b**: Extended fragmentation (5%, 2%, 1% retention)
+- Climate trend forcing during cascade phase
+- Validation against observed Amazon data
 
-1. **Timescale Mismatch Barrier**: The 98-year GIS vs 1-year Amazon timescale difference prevents cascade propagation even with strong coupling (0.5)
+---
 
-2. **Noise Type Matters**: Lévy noise (α=1.5) enables back-tipping and extreme events; Gaussian (α=2.0) produces bounded dynamics
+## Technical Implementation
 
-3. **Coupling Asymmetry is a Stabilizing Mechanism** ⭐ *Major Finding*
-   - Original Wunderling network has asymmetric couplings that protect GIS from cascading
-   - Symmetrizing couplings causes GIS to tip (0% → 85% time in tipped state)
-   - GIS-THC correlation flips from negative (-0.2) to positive (+0.35)
-   - Statistical significance confirmed via ensemble analysis (N=20, p < 0.001)
+### Custom Module: `energy_constrained`
 
-4. **Amazon is a Network Sink**: Original model has no outgoing connections from Amazon; adding feedback links (AMAZ→THC) moderately affects dynamics
+```python
+from energy_constrained import (
+    EnergyConstrainedNetwork,      # Network container
+    EnergyConstrainedCusp,         # Bistable elements with potential
+    GradientDrivenCoupling,        # Thermodynamically-consistent coupling
+    run_two_phase_experiment,      # Cascade → Recovery simulation
+    EnergyAnalyzer,                # Entropy & tipping event analysis
+    get_dask_client                # Parallel execution on k3s
+)
+```
 
-5. **Ensemble Methods Essential**: Single trajectories misleading due to Lévy noise; ensemble statistics required to detect coupling effects
+### Critical Solver Fix (December 2025)
 
-6. **Moisture Recycling is Protective** ⭐ *Major Finding*
-   - Amazon spatial model shows coupling PREVENTS tipping (negative cascade amplification)
-   - At r_crit=1800 mm/year, coupling saves 22 cells (17% reduction in tipping)
-   - Edge cells benefit most from interior forest moisture support
-   - Natural "cascade firewalls" exist in moisture recycling networks
+A boundary oscillation bug was discovered and fixed in the Euler-Maruyama solver:
+- **Problem**: Hard clamp at ±10 caused 96.8% of trajectory time at boundaries
+- **Fix**: Soft reflection at ±2 keeps cells in bistable region
+- **Impact**: All experiments prior to Dec 12, 2025 require re-validation
 
-## Next: Phase 3 - Energy-Constrained Extensions
-
-Design and implement energy/thermodynamic constraints:
-1. New tipping element types with energy flux terms
-2. Energy-based coupling functions
-3. Dissipative network tracking system-wide energy balance
-4. Custom solvers with energy constraints
+---
 
 ## Directory Structure
 
 ```
 cascades/
-├── README.md                    # This file
-├── energy_constrained_tipping_cascades_research_project.md  # Full project plan
-├── foundations_reading_list.md  # Background literature
-├── docs/
-│   ├── pycascades_architecture.md  # Framework documentation
-│   ├── phase2_conclusions.md       # Phase 2 findings & analysis
-│   └── thermodynamic_tipping_points_literature_review.md  # Phase 3 foundation
+├── src/energy_constrained/          # Custom thermodynamic module
+│   ├── elements.py                  # EnergyConstrainedCusp
+│   ├── couplings.py                 # GradientDrivenCoupling
+│   ├── network.py                   # Network container
+│   ├── solvers.py                   # Euler-Maruyama with Lévy noise
+│   ├── analysis.py                  # EnergyAnalyzer
+│   └── dask_utils.py                # Parallel execution utilities
 ├── notebooks/
-│   ├── 01_earth_system_tipping_exploration.ipynb
-│   ├── 02_asymmetric_coupling_exploration.ipynb
-│   └── 03_amazon_moisture_recycling.ipynb
-├── external/
-│   ├── pycascades/             # PIK framework (cloned)
-│   ├── pyunicorn/              # Complex networks (cloned)
-│   └── pycopancore/            # World-Earth modeling (cloned)
-└── configs/
-    └── Dockerfile              # JupyterLab container
+│   ├── 01-05: Phase 2-3 exploration
+│   ├── 06_network_fragmentation.ipynb    # Experiment 8
+│   ├── 07_recovery_dynamics.ipynb        # Experiment 9
+│   ├── 08_alpha_sweep.ipynb              # Experiment 10
+│   ├── 09_alpha_sigma_sweep.ipynb        # Experiment 10b
+│   └── 10_restoration_forcing.ipynb      # Experiment 10c
+├── docs/
+│   ├── phase4_results.md            # Comprehensive experiment results
+│   ├── phase2_conclusions.md        # Earlier findings
+│   └── pycascades_architecture.md   # Framework documentation
+├── data/                            # Amazon moisture recycling data
+│   └── amazon/                      # Wunderling et al. 2022 dataset
+└── external/
+    └── pycascades/                  # PIK framework (dependency)
 ```
 
-## Quick Start
+---
+
+## Infrastructure
+
+### K3s Cluster (Single Node)
+
+| Service | Port | Purpose |
+|---------|------|---------|
+| JupyterLab | 30888 | Interactive notebooks |
+| Dask Dashboard | 30787 | Parallel task monitoring |
+| MLflow | 30505 | Experiment tracking |
+
+### Dask Configuration
+
+- **14 workers** (1.5 CPU, 1GB RAM each)
+- Optimized scatter-based task distribution
+- ~2x speedup over initial configuration
 
 ```bash
-# Access JupyterLab
-http://localhost:30888
+# Access services
+http://localhost:30888  # JupyterLab
+http://localhost:30787  # Dask Dashboard
+http://localhost:30505  # MLflow
 
-# Access MLflow
-http://localhost:30505
-
-# Check pod status
+# Check cluster status
 kubectl get pods -n cascades
 ```
 
-## Key Import Paths (PyCascades)
+---
 
-```python
-# For custom network building
-from pycascades.core.tipping_element import cusp
-from pycascades.earth_system.tipping_network_earth_system import tipping_network
-from pycascades.earth_system.earth import linear_coupling_earth_system
-from pycascades.earth_system.functions_earth_system import global_functions
-```
+## Key References
 
-## References
+- Wunderling et al. (2021) - PyCascades framework
+- Wunderling et al. (2022) - Amazon moisture recycling network data
+- Lenton et al. (2008) - Tipping elements in Earth's climate system
 
-- Wunderling et al. (2021) - PyCascades framework paper
-- Full reading list in `foundations_reading_list.md`
+---
+
+## Research Outputs
+
+### Phase 4 Documentation
+- [Experiment Results](docs/phase4_results.md) - Comprehensive findings with methodology
+- [Research Plan](docs/phase4_research_plan.md) - Experimental design
+
+### Key Metrics Tracked
+- Tip/Recovery ratio by fragmentation level
+- Entropy production (thermodynamic activity)
+- Tipping event counts and transitions
+- Recovery fraction under various noise regimes
+
+---
+
+*Last Updated: December 12, 2025*
