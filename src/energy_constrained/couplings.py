@@ -537,6 +537,263 @@ class ActivationBarrierCoupling(EnergyCoupling):
         return -self.k
 
 
+class StateDependentCoupling(EnergyCoupling):
+    """
+    Coupling where strength depends on source element state.
+
+    Models the biological reality that tipped/degraded elements provide
+    less support to their neighbors:
+    - Dead forest can't recycle moisture to neighbors
+    - Collapsed ecosystems can't provide services to adjacent regions
+    - Fire-damaged areas can't buffer neighboring forests
+
+    When the source element is tipped (x > 0), coupling strength is
+    reduced by degradation_factor.
+
+    Parameters
+    ----------
+    base_conductivity : float
+        Coupling strength when source is in stable state (default 0.1)
+    degradation_factor : float
+        Multiplier when source is tipped, 0 < factor < 1 (default 0.3)
+        e.g., 0.3 means tipped cells provide 30% of normal support
+    state_threshold : float
+        State value above which element is considered tipped (default 0)
+
+    Notes
+    -----
+    This creates a positive feedback loop:
+    1. Cell A tips
+    2. Cell A provides less support to neighbor B
+    3. Cell B is more likely to tip
+    4. Cascade propagates more easily than it recovers
+
+    References
+    ----------
+    - Westen (2023): AMOC hysteresis from state-dependent feedbacks
+    - Amazon moisture recycling: degraded forest reduces evapotranspiration
+    """
+
+    def __init__(
+        self,
+        base_conductivity: float = 0.1,
+        degradation_factor: float = 0.3,
+        state_threshold: float = 0.0
+    ):
+        self.k_base = base_conductivity
+        self.degradation = np.clip(degradation_factor, 0.0, 1.0)
+        self.threshold = state_threshold
+
+    def effective_conductivity(self, x_from: float) -> float:
+        """
+        Compute effective coupling strength based on source state.
+
+        Parameters
+        ----------
+        x_from : float
+            State of source element
+
+        Returns
+        -------
+        float
+            Effective coupling strength
+        """
+        if x_from > self.threshold:
+            # Source is tipped: reduced coupling
+            return self.k_base * self.degradation
+        else:
+            # Source is stable: full coupling
+            return self.k_base
+
+    def energy_transfer_rate(
+        self,
+        x_from: float,
+        x_to: float,
+        E_from: float,
+        E_to: float
+    ) -> float:
+        """
+        Energy transfer with state-dependent conductivity.
+
+        Φ = k_eff(x_from) * (E_from - E_to)
+
+        Parameters
+        ----------
+        x_from, x_to : float
+            State variables
+        E_from, E_to : float
+            Element energies
+
+        Returns
+        -------
+        float
+            Energy transfer rate
+        """
+        if not (np.isfinite(E_from) and np.isfinite(E_to)):
+            return 0.0
+
+        k_eff = self.effective_conductivity(x_from)
+        return k_eff * (E_from - E_to)
+
+    def dxdt_cpl(
+        self,
+        x_from: float,
+        x_to: float,
+        E_from: Optional[float] = None,
+        E_to: Optional[float] = None
+    ) -> float:
+        """
+        State coupling with state-dependent strength.
+
+        Parameters
+        ----------
+        x_from, x_to : float
+            State variables
+        E_from, E_to : float, optional
+            Element energies
+
+        Returns
+        -------
+        float
+            Rate of change contribution to x_to
+        """
+        x_from = np.clip(x_from, -10.0, 10.0)
+        x_to = np.clip(x_to, -10.0, 10.0)
+
+        k_eff = self.effective_conductivity(x_from)
+
+        if E_from is not None and E_to is not None:
+            if np.isfinite(E_from) and np.isfinite(E_to):
+                return k_eff * (E_from - E_to)
+            return 0.0
+        else:
+            # Fallback: state-based coupling
+            return k_eff * (x_from - x_to)
+
+    def jac_cpl(self, x_from: float, x_to: float) -> float:
+        """Jacobian (uses current effective conductivity)."""
+        return self.effective_conductivity(x_from)
+
+    def jac_diag(self, x_from: float, x_to: float) -> float:
+        """Diagonal Jacobian."""
+        return -self.effective_conductivity(x_from)
+
+
+class TrendForcingCoupling(EnergyCoupling):
+    """
+    Coupling that includes time-varying climate trend forcing.
+
+    Models unidirectional climate change as a drift term that
+    pushes the system toward tipping over time.
+
+    This is not technically a "coupling" but uses the coupling
+    interface to inject time-dependent forcing into the dynamics.
+
+    Parameters
+    ----------
+    initial_forcing : float
+        Initial value of forcing parameter c (default 0)
+    trend_rate : float
+        Rate of forcing change per time unit (default 0.001)
+        Positive = toward tipping
+    max_forcing : float
+        Maximum forcing value (caps the trend, default 1.0)
+
+    Notes
+    -----
+    The forcing c(t) shifts the cusp potential:
+        dx/dt = a*x³ + b*x + c(t)
+
+    Positive c pushes the stable equilibrium toward x=0 (the barrier),
+    making tipping more likely over time.
+
+    To use: add as a "self-coupling" where source = destination,
+    then the dxdt_cpl contribution acts as external forcing.
+    """
+
+    def __init__(
+        self,
+        initial_forcing: float = 0.0,
+        trend_rate: float = 0.001,
+        max_forcing: float = 1.0
+    ):
+        self.c_0 = initial_forcing
+        self.trend = trend_rate
+        self.c_max = max_forcing
+        self._current_time = 0.0
+
+    def set_time(self, t: float) -> None:
+        """Update current time for forcing calculation."""
+        self._current_time = t
+
+    def get_forcing(self, t: Optional[float] = None) -> float:
+        """
+        Compute forcing at given time.
+
+        Parameters
+        ----------
+        t : float, optional
+            Time (uses stored time if not provided)
+
+        Returns
+        -------
+        float
+            Forcing value c(t)
+        """
+        if t is None:
+            t = self._current_time
+
+        c = self.c_0 + self.trend * t
+        return np.clip(c, -self.c_max, self.c_max)
+
+    def energy_transfer_rate(
+        self,
+        x_from: float,
+        x_to: float,
+        E_from: float,
+        E_to: float
+    ) -> float:
+        """Not used for trend forcing."""
+        return 0.0
+
+    def dxdt_cpl(
+        self,
+        x_from: float,
+        x_to: float,
+        E_from: Optional[float] = None,
+        E_to: Optional[float] = None,
+        t: Optional[float] = None
+    ) -> float:
+        """
+        Return forcing contribution to dynamics.
+
+        When used as self-coupling, this adds c(t) to dx/dt.
+
+        Parameters
+        ----------
+        x_from, x_to : float
+            State variables (ignored)
+        E_from, E_to : float, optional
+            Energies (ignored)
+        t : float, optional
+            Time for forcing calculation
+
+        Returns
+        -------
+        float
+            Forcing value c(t)
+        """
+        return self.get_forcing(t)
+
+    def jac_cpl(self, x_from: float, x_to: float) -> float:
+        """No state dependence in forcing."""
+        return 0.0
+
+    def jac_diag(self, x_from: float, x_to: float) -> float:
+        """No state dependence in forcing."""
+        return 0.0
+
+
 # Factory function for creating Earth system couplings
 def create_coupling_matrix(
     coupling_type: str = 'gradient',

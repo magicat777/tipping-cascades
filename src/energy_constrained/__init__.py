@@ -14,10 +14,33 @@ Key components:
 - dask_utils: Distributed computing support for large-scale experiments
 """
 
-from .elements import EnergyConstrainedElement, EnergyConstrainedCusp
-from .couplings import EnergyCoupling, GradientDrivenCoupling, AsymmetricEnergyCoupling
-from .network import EnergyConstrainedNetwork
-from .solvers import energy_constrained_euler_maruyama, run_ensemble
+from .elements import (
+    EnergyConstrainedElement,
+    EnergyConstrainedCusp,
+    AsymmetricBarrierCusp,
+    HistoryDependentCusp
+)
+from .couplings import (
+    EnergyCoupling,
+    GradientDrivenCoupling,
+    AsymmetricEnergyCoupling,
+    StateDependentCoupling,
+    TrendForcingCoupling
+)
+from .network import (
+    EnergyConstrainedNetwork,
+    fragment_network,
+    compute_network_metrics,
+    run_fragmentation_sweep
+)
+from .solvers import (
+    energy_constrained_euler_maruyama,
+    run_ensemble,
+    TwoPhaseResult,
+    run_two_phase_experiment,
+    run_two_phase_ensemble,
+    aggregate_two_phase_results
+)
 from .analysis import EnergyAnalyzer
 
 # Dask utilities (optional, graceful degradation if Dask not installed)
@@ -53,13 +76,25 @@ __all__ = [
     # Core classes
     'EnergyConstrainedElement',
     'EnergyConstrainedCusp',
+    'AsymmetricBarrierCusp',
+    'HistoryDependentCusp',
     'EnergyCoupling',
     'GradientDrivenCoupling',
     'AsymmetricEnergyCoupling',
+    'StateDependentCoupling',
+    'TrendForcingCoupling',
     'EnergyConstrainedNetwork',
+    # Network fragmentation
+    'fragment_network',
+    'compute_network_metrics',
+    'run_fragmentation_sweep',
     # Solvers
     'energy_constrained_euler_maruyama',
     'run_ensemble',
+    'TwoPhaseResult',
+    'run_two_phase_experiment',
+    'run_two_phase_ensemble',
+    'aggregate_two_phase_results',
     # Analysis
     'EnergyAnalyzer',
     # Dask utilities

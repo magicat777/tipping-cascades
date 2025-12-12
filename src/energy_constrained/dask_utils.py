@@ -75,10 +75,35 @@ def get_dask_client(
     # Try to get existing client
     try:
         client = get_client()
-        print(f"Using existing Dask client: {client.dashboard_link}")
-        # Ensure workers have the path initialized
-        client.run(_init_worker_path)
-        return client
+        # Verify client is connected to k3s (not local) and healthy
+        try:
+            scheduler_addr = client.scheduler.address if hasattr(client, 'scheduler') else ''
+            n_workers = len(client.scheduler_info()['workers'])
+
+            # Check if connected to k3s cluster (not local)
+            is_k3s = 'cascades-dask-scheduler' in scheduler_addr or scheduler_addr == K3S_DASK_SCHEDULER
+
+            if n_workers > 0 and is_k3s:
+                print(f"Using existing Dask client: {client.dashboard_link}")
+                print(f"  Scheduler: {scheduler_addr}")
+                print(f"  Workers: {n_workers}")
+                # Ensure workers have the path initialized
+                client.run(_init_worker_path)
+                return client
+            else:
+                # Connected to local cluster, close and reconnect to k3s
+                print(f"Existing client is local ({scheduler_addr}), reconnecting to k3s...")
+                try:
+                    client.close()
+                except Exception:
+                    pass
+        except Exception as e:
+            # Existing client is stale, close it and reconnect
+            print(f"Existing client unhealthy: {e}")
+            try:
+                client.close()
+            except Exception:
+                pass
     except ValueError:
         pass  # No existing client
 
@@ -233,18 +258,22 @@ def run_ensemble_parallel(
             for i, r in enumerate(results)
         ]
 
-    # Serialize network once
+    # Serialize network once and SCATTER to workers
+    # This sends data ONCE to all workers instead of with every task
     network_bytes = pickle.dumps(network)
+    network_future = client.scatter(network_bytes, broadcast=True)
+    print(f"Network scattered to workers ({len(network_bytes) / 1024:.1f} KB)")
 
     print(f"Submitting {n_runs} simulations to Dask cluster...")
 
-    # Submit all jobs
+    # Submit all jobs using scattered data reference
     futures = []
     for i in range(n_runs):
         future = client.submit(
             _run_single_simulation,
-            network_bytes, i, duration, dt, sigma, alpha, seed, x0,
-            key=f"sim_{seed}_{i}"
+            network_future, i, duration, dt, sigma, alpha, seed, x0,
+            key=f"sim_{seed}_{i}",
+            pure=False  # These are stochastic simulations
         )
         futures.append(future)
 
@@ -502,3 +531,165 @@ def results_to_solver_results(results: List[Dict[str, Any]]) -> List:
         )
         for r in results
     ]
+
+
+def submit_experiment_batch(
+    client: 'Client',
+    worker_func: Callable,
+    network_bytes: bytes,
+    tasks: List[Dict[str, Any]],
+    scatter_network: bool = True
+) -> List:
+    """
+    Submit a batch of experiments with optimized data transfer.
+
+    This function pre-scatters the network data to all workers ONCE,
+    then submits all tasks using references to the scattered data.
+    This eliminates the O(n_tasks * network_size) serialization overhead.
+
+    Parameters
+    ----------
+    client : Client
+        Dask client
+    worker_func : callable
+        Function to execute on workers. Should accept (network_bytes, **task_kwargs)
+    network_bytes : bytes
+        Pickled network data
+    tasks : list of dict
+        List of task configurations. Each dict contains kwargs for worker_func.
+        Must include 'key' for task naming.
+    scatter_network : bool
+        If True, scatter network to workers. Set False if already scattered.
+
+    Returns
+    -------
+    list of Future
+        Futures for all submitted tasks
+
+    Example
+    -------
+    >>> tasks = [
+    ...     {'recovery_alpha': 1.5, 'seed': 42, 'key': 'alpha_1.5_run_0'},
+    ...     {'recovery_alpha': 1.5, 'seed': 43, 'key': 'alpha_1.5_run_1'},
+    ... ]
+    >>> futures = submit_experiment_batch(client, worker_func, network_bytes, tasks)
+    >>> for future in as_completed(futures):
+    ...     result = future.result()
+    """
+    # Scatter network data ONCE to all workers
+    if scatter_network:
+        network_future = client.scatter(network_bytes, broadcast=True)
+        print(f"  Network scattered to workers ({len(network_bytes) / 1024:.1f} KB)")
+    else:
+        network_future = network_bytes  # Assume already a Future
+
+    # Submit all tasks at once - no waiting between submissions
+    futures = []
+    for task in tasks:
+        key = task.pop('key', None)
+        future = client.submit(
+            worker_func,
+            network_bytes=network_future,
+            **task,
+            key=key,
+            pure=False  # Stochastic simulations
+        )
+        futures.append(future)
+
+    return futures
+
+
+def run_alpha_sweep_optimized(
+    client: 'Client',
+    network,
+    alpha_values: List[float],
+    n_runs_per_alpha: int,
+    config: Dict[str, Any],
+    worker_func: Callable,
+    base_seed: int = 42
+) -> List[Dict[str, Any]]:
+    """
+    Run alpha-sweep experiment with optimized Dask performance.
+
+    Designed to maximize worker utilization by:
+    1. Scattering network data ONCE to all workers
+    2. Submitting ALL tasks upfront (not waiting for completions)
+    3. Using as_completed for streaming results
+
+    Parameters
+    ----------
+    client : Client
+        Dask client
+    network : EnergyConstrainedNetwork
+        Network to simulate
+    alpha_values : list of float
+        Alpha values to sweep
+    n_runs_per_alpha : int
+        Number of runs per alpha
+    config : dict
+        Experiment configuration passed to worker_func
+    worker_func : callable
+        Worker function that accepts (network_bytes, recovery_alpha, config, seed)
+    base_seed : int
+        Base random seed
+
+    Returns
+    -------
+    list of dict
+        All results
+    """
+    import time
+
+    # Serialize and scatter network
+    network_bytes = pickle.dumps(network)
+    network_future = client.scatter(network_bytes, broadcast=True)
+    print(f"Network scattered to workers ({len(network_bytes) / 1024:.1f} KB)")
+
+    # Build all tasks upfront
+    total_tasks = len(alpha_values) * n_runs_per_alpha
+    print(f"Submitting {total_tasks} tasks...")
+
+    start_submit = time.time()
+    futures = []
+    task_info = {}  # Map future key to (alpha, run_idx)
+
+    for i, alpha in enumerate(alpha_values):
+        for run_idx in range(n_runs_per_alpha):
+            seed = base_seed + i * 1000 + run_idx
+            key = f"alpha_{alpha:.1f}_run_{run_idx}"
+
+            future = client.submit(
+                worker_func,
+                network_bytes=network_future,
+                recovery_alpha=float(alpha),
+                config=config,
+                seed=seed,
+                key=key,
+                pure=False
+            )
+            futures.append(future)
+            task_info[key] = (alpha, run_idx)
+
+    submit_time = time.time() - start_submit
+    print(f"All {total_tasks} tasks submitted in {submit_time:.1f}s")
+
+    # Collect results with progress
+    all_results = []
+    completed_by_alpha = {float(a): 0 for a in alpha_values}
+
+    print("Processing results...")
+    for future in as_completed(futures):
+        result = future.result()
+        all_results.append(result)
+
+        # Track progress
+        alpha = result.get('recovery_alpha', 0)
+        if alpha in completed_by_alpha:
+            completed_by_alpha[alpha] += 1
+
+        # Print progress
+        total_completed = len(all_results)
+        if total_completed % n_runs_per_alpha == 0:
+            print(f"  Completed {total_completed}/{total_tasks}")
+
+    return all_results

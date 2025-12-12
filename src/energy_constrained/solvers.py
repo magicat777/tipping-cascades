@@ -251,8 +251,24 @@ def energy_constrained_euler_maruyama(
         y_pred = y_det.copy()
         y_pred[:n_elements] += noise
 
-        # State bounds to prevent numerical overflow (Lévy noise can produce extreme jumps)
-        y_pred[:n_elements] = np.clip(y_pred[:n_elements], -10.0, 10.0)
+        # State bounds with soft reflection to prevent boundary oscillation
+        # The cusp potential has stable equilibria at x ≈ ±1, so we use bounds
+        # slightly outside this range. When states exceed bounds, we reflect
+        # them back rather than hard clamping, which prevents numerical instability.
+        x_bound = 2.0  # Just outside bistable region (equilibria at ±1)
+        x_states = y_pred[:n_elements]
+
+        # Soft reflection: if |x| > bound, reflect back into valid range
+        # This prevents the boundary oscillation that occurs with hard clamping
+        for j in range(n_elements):
+            if x_states[j] > x_bound:
+                # Reflect back: overshoot beyond bound gets folded back
+                x_states[j] = x_bound - (x_states[j] - x_bound) * 0.5
+            elif x_states[j] < -x_bound:
+                x_states[j] = -x_bound - (x_states[j] + x_bound) * 0.5
+
+        # Final hard clamp as safety net (should rarely be needed)
+        y_pred[:n_elements] = np.clip(x_states, -3.0, 3.0)
 
         # Energy constraint enforcement (default bounds if not specified)
         if energy_bounds is not None:
@@ -545,3 +561,351 @@ def compute_ensemble_statistics(
         'correlations': correlations,
         'n_runs': n_runs
     }
+
+
+@dataclass
+class TwoPhaseResult:
+    """
+    Container for two-phase cascade-then-recovery experiment results.
+
+    Attributes
+    ----------
+    cascade_result : SolverResult
+        Results from cascade phase
+    recovery_result : SolverResult
+        Results from recovery phase
+    t_full : ndarray
+        Combined time array
+    x_full : ndarray
+        Combined state trajectory
+    E_full : ndarray
+        Combined energy trajectory
+    cascade_end_state : ndarray
+        State at end of cascade phase
+    tipped_at_cascade_end : ndarray
+        Boolean array of which elements were tipped at cascade end
+    recovered : ndarray
+        Boolean array of which tipped elements recovered
+    recovery_times : dict
+        Time to recovery for each element (NaN if didn't recover)
+    metrics : dict
+        Summary metrics
+    """
+    cascade_result: SolverResult
+    recovery_result: SolverResult
+    t_full: np.ndarray
+    x_full: np.ndarray
+    E_full: np.ndarray
+    cascade_end_state: np.ndarray
+    tipped_at_cascade_end: np.ndarray
+    recovered: np.ndarray
+    recovery_times: Dict[int, float]
+    metrics: Dict[str, Any]
+
+
+def run_two_phase_experiment(
+    network,
+    cascade_duration: float = 200,
+    recovery_duration: float = 800,
+    dt: float = 0.5,
+    cascade_sigma: float = 0.06,
+    cascade_alpha: float = 1.5,
+    recovery_sigma: float = 0.02,
+    recovery_alpha: float = 2.0,
+    recovery_forcing: float = 0.0,
+    x0: Optional[np.ndarray] = None,
+    seed: Optional[int] = None
+) -> TwoPhaseResult:
+    """
+    Run two-phase cascade-then-recovery experiment.
+
+    Phase 1 (Cascade): Apply Lévy noise to trigger cascades
+    Phase 2 (Recovery): Switch to gentle Gaussian noise, observe recovery
+
+    Parameters
+    ----------
+    network : EnergyConstrainedNetwork
+        Network to simulate
+    cascade_duration : float
+        Duration of cascade phase (default 200)
+    recovery_duration : float
+        Duration of recovery phase (default 800)
+    dt : float
+        Time step (default 0.5)
+    cascade_sigma : float
+        Noise amplitude during cascade phase (default 0.06)
+    cascade_alpha : float
+        Lévy stability parameter during cascade (default 1.5)
+    recovery_sigma : float
+        Noise amplitude during recovery phase (default 0.02)
+    recovery_alpha : float
+        Stability parameter during recovery - 2.0 = Gaussian (default 2.0)
+    recovery_forcing : float
+        Constant forcing during recovery phase (default 0.0).
+        Negative values push toward stable state (x < 0), simulating
+        active restoration intervention. Typical range: -0.1 to -0.5.
+    x0 : array-like, optional
+        Initial states
+    seed : int, optional
+        Random seed
+
+    Returns
+    -------
+    TwoPhaseResult
+        Container with results and recovery metrics
+    """
+    n_elements = network.n_elements
+
+    if seed is not None:
+        np.random.seed(seed)
+
+    # Prepare initial state
+    y0 = network.get_initial_state(x0)
+
+    # === Phase 1: Cascade ===
+    cascade_result = energy_constrained_euler_maruyama(
+        f_extended=network.f_extended,
+        y0=y0,
+        t_span=(0, cascade_duration),
+        dt=dt,
+        sigma=cascade_sigma * np.ones(n_elements),
+        alpha=cascade_alpha * np.ones(n_elements)
+    )
+
+    # Record state at cascade end
+    cascade_end_state = cascade_result.x[-1].copy()
+    cascade_end_y = cascade_result.y[-1].copy()
+    tipped_at_cascade_end = cascade_end_state > 0
+
+    # === Phase 2: Recovery ===
+    # Continue from cascade end state
+    # If recovery_forcing != 0, wrap f_extended to add constant forcing
+    if recovery_forcing != 0.0:
+        # Create modified dynamics with forcing
+        original_f = network.f_extended
+        def f_with_forcing(t, y):
+            dydt = original_f(t, y)
+            # Add forcing to state variables (first n_elements), not energy
+            dydt[:n_elements] += recovery_forcing
+            return dydt
+        recovery_f = f_with_forcing
+    else:
+        recovery_f = network.f_extended
+
+    recovery_result = energy_constrained_euler_maruyama(
+        f_extended=recovery_f,
+        y0=cascade_end_y,
+        t_span=(0, recovery_duration),
+        dt=dt,
+        sigma=recovery_sigma * np.ones(n_elements),
+        alpha=recovery_alpha * np.ones(n_elements)
+    )
+
+    # Combine trajectories
+    # Shift recovery time to continue from cascade end
+    t_full = np.concatenate([
+        cascade_result.t,
+        cascade_result.t[-1] + recovery_result.t[1:]  # Skip t=0 of recovery
+    ])
+    x_full = np.concatenate([
+        cascade_result.x,
+        recovery_result.x[1:]  # Skip first row (same as cascade end)
+    ], axis=0)
+    E_full = np.concatenate([
+        cascade_result.E,
+        recovery_result.E[1:]
+    ], axis=0)
+
+    # === Analyze Recovery ===
+    recovered = np.zeros(n_elements, dtype=bool)
+    recovery_times = {}
+
+    for i in range(n_elements):
+        if tipped_at_cascade_end[i]:
+            # Find first time this element crossed back to stable (x < 0)
+            recovery_traj = recovery_result.x[:, i]
+            recovery_crossings = np.where(recovery_traj < 0)[0]
+
+            if len(recovery_crossings) > 0:
+                # Find first crossing that persists (to avoid brief excursions)
+                for cross_idx in recovery_crossings:
+                    # Check if it stays stable for at least 10 time steps
+                    if cross_idx + 10 < len(recovery_traj):
+                        if np.all(recovery_traj[cross_idx:cross_idx+10] < 0):
+                            recovered[i] = True
+                            recovery_times[i] = recovery_result.t[cross_idx]
+                            break
+                    else:
+                        # Near end, just check remaining
+                        if np.all(recovery_traj[cross_idx:] < 0):
+                            recovered[i] = True
+                            recovery_times[i] = recovery_result.t[cross_idx]
+                            break
+
+            if i not in recovery_times:
+                recovery_times[i] = np.nan
+        else:
+            recovery_times[i] = 0.0  # Wasn't tipped, no recovery needed
+
+    # === Compute Metrics ===
+    n_tipped = np.sum(tipped_at_cascade_end)
+    n_recovered = np.sum(recovered)
+
+    metrics = {
+        'cascade_duration': cascade_duration,
+        'recovery_duration': recovery_duration,
+        'cascade_sigma': cascade_sigma,
+        'cascade_alpha': cascade_alpha,
+        'recovery_sigma': recovery_sigma,
+        'recovery_alpha': recovery_alpha,
+        'recovery_forcing': recovery_forcing,
+        'n_elements': n_elements,
+        'n_tipped_at_cascade_end': int(n_tipped),
+        'pct_tipped_at_cascade_end': float(n_tipped / n_elements * 100),
+        'n_recovered': int(n_recovered),
+        'recovery_fraction': float(n_recovered / n_tipped) if n_tipped > 0 else np.nan,
+        'mean_recovery_time': float(np.nanmean(list(recovery_times.values()))),
+        'n_permanent_tips': int(n_tipped - n_recovered),
+        'final_pct_tipped': float(np.sum(recovery_result.x[-1] > 0) / n_elements * 100)
+    }
+
+    return TwoPhaseResult(
+        cascade_result=cascade_result,
+        recovery_result=recovery_result,
+        t_full=t_full,
+        x_full=x_full,
+        E_full=E_full,
+        cascade_end_state=cascade_end_state,
+        tipped_at_cascade_end=tipped_at_cascade_end,
+        recovered=recovered,
+        recovery_times=recovery_times,
+        metrics=metrics
+    )
+
+
+def run_two_phase_ensemble(
+    network,
+    n_runs: int,
+    cascade_duration: float = 200,
+    recovery_duration: float = 800,
+    dt: float = 0.5,
+    cascade_sigma: float = 0.06,
+    cascade_alpha: float = 1.5,
+    recovery_sigma: float = 0.02,
+    recovery_alpha: float = 2.0,
+    x0: Optional[np.ndarray] = None,
+    seed: Optional[int] = None,
+    progress: bool = True
+) -> List[TwoPhaseResult]:
+    """
+    Run ensemble of two-phase experiments.
+
+    Parameters
+    ----------
+    network : EnergyConstrainedNetwork
+        Network to simulate
+    n_runs : int
+        Number of ensemble members
+    cascade_duration : float
+        Duration of cascade phase
+    recovery_duration : float
+        Duration of recovery phase
+    dt : float
+        Time step
+    cascade_sigma : float
+        Noise amplitude during cascade phase
+    cascade_alpha : float
+        Lévy stability parameter during cascade
+    recovery_sigma : float
+        Noise amplitude during recovery phase
+    recovery_alpha : float
+        Stability parameter during recovery (2.0 = Gaussian)
+    x0 : array-like, optional
+        Initial states
+    seed : int, optional
+        Base random seed
+    progress : bool
+        Show progress indicator
+
+    Returns
+    -------
+    list of TwoPhaseResult
+        Ensemble results
+    """
+    results = []
+
+    for i in range(n_runs):
+        run_seed = seed + i if seed is not None else None
+
+        if progress and (i + 1) % 5 == 0:
+            print(f"  Run {i+1}/{n_runs}")
+
+        result = run_two_phase_experiment(
+            network=network,
+            cascade_duration=cascade_duration,
+            recovery_duration=recovery_duration,
+            dt=dt,
+            cascade_sigma=cascade_sigma,
+            cascade_alpha=cascade_alpha,
+            recovery_sigma=recovery_sigma,
+            recovery_alpha=recovery_alpha,
+            x0=x0,
+            seed=run_seed
+        )
+        results.append(result)
+
+    return results
+
+
+def aggregate_two_phase_results(results: List[TwoPhaseResult]) -> Dict[str, Any]:
+    """
+    Aggregate metrics across two-phase ensemble.
+
+    Parameters
+    ----------
+    results : list of TwoPhaseResult
+        Ensemble results
+
+    Returns
+    -------
+    dict
+        Aggregated statistics
+    """
+    n_runs = len(results)
+
+    # Collect metrics across runs
+    metrics_list = [r.metrics for r in results]
+
+    # Aggregate
+    aggregated = {
+        'n_runs': n_runs,
+        'mean_pct_tipped': np.mean([m['pct_tipped_at_cascade_end'] for m in metrics_list]),
+        'std_pct_tipped': np.std([m['pct_tipped_at_cascade_end'] for m in metrics_list]),
+        'mean_recovery_fraction': np.nanmean([m['recovery_fraction'] for m in metrics_list]),
+        'std_recovery_fraction': np.nanstd([m['recovery_fraction'] for m in metrics_list]),
+        'mean_recovery_time': np.nanmean([m['mean_recovery_time'] for m in metrics_list]),
+        'mean_permanent_tips': np.mean([m['n_permanent_tips'] for m in metrics_list]),
+        'mean_final_pct_tipped': np.mean([m['final_pct_tipped'] for m in metrics_list]),
+    }
+
+    # Element-level recovery statistics
+    n_elements = results[0].metrics['n_elements']
+    element_recovery_rates = np.zeros(n_elements)
+
+    for i in range(n_elements):
+        tipped_count = 0
+        recovered_count = 0
+        for r in results:
+            if r.tipped_at_cascade_end[i]:
+                tipped_count += 1
+                if r.recovered[i]:
+                    recovered_count += 1
+        if tipped_count > 0:
+            element_recovery_rates[i] = recovered_count / tipped_count
+        else:
+            element_recovery_rates[i] = np.nan
+
+    aggregated['element_recovery_rates'] = element_recovery_rates
+    aggregated['most_vulnerable_elements'] = np.argsort(element_recovery_rates)[:5]
+
+    return aggregated

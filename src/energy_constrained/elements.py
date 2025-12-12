@@ -557,3 +557,376 @@ EARTH_SYSTEM_ELEMENTS = {
     'WAIS': {'timescale': 48, 'tipping_threshold': 1.42},
     'AMAZ': {'timescale': 1, 'tipping_threshold': 4.10},
 }
+
+
+class AsymmetricBarrierCusp(EnergyConstrainedCusp):
+    """
+    Cusp tipping element with asymmetric barrier heights for tip vs recovery.
+
+    This models the biological reality that degradation (tipping) is often
+    faster/easier than recovery:
+    - Trees grow over decades but burn in hours
+    - Ecosystems collapse rapidly but recover slowly
+    - Species loss is fast, recolonization is slow
+
+    The potential landscape has different barrier heights:
+    - barrier_tip: Height from stable state to saddle point
+    - barrier_recovery: Height from tipped state to saddle point
+
+    When barrier_recovery > barrier_tip, recovery is harder than tipping,
+    creating hysteresis in the system.
+
+    Parameters
+    ----------
+    a : float
+        Cubic coefficient (default -1)
+    b : float
+        Linear coefficient (default 1)
+    c : float
+        Constant forcing (default 0)
+    x_0 : float
+        Reference point (default 0)
+    barrier_tip : float
+        Barrier height for stable → tipped transition (default 0.5)
+    barrier_recovery : float
+        Barrier height for tipped → stable transition (default 1.0)
+    E_stable : float
+        Energy at stable state (default 0.0)
+    E_tipped : float
+        Energy at tipped state (default 0.5)
+    dissipation_rate : float
+        Damping coefficient (default 0.1)
+    heat_capacity : float
+        Energy storage coefficient (default 1.0)
+    effective_temperature : float
+        Temperature for entropy calculations (default 1.0)
+
+    Notes
+    -----
+    The asymmetric potential is constructed as:
+        U(x) = { U_stable_well(x)  if x < 0
+               { U_tipped_well(x)  if x >= 0
+
+    Where each well is scaled to have the appropriate barrier height.
+
+    References
+    ----------
+    - Bärtschi (2024): Ecosystem tipping symmetry
+    - Scheffer (2012): Anticipating critical transitions
+    """
+
+    def __init__(
+        self,
+        # Cusp parameters
+        a: float = -1,
+        b: float = 1,
+        c: float = 0,
+        x_0: float = 0,
+        # Asymmetric barrier parameters
+        barrier_tip: float = 0.5,
+        barrier_recovery: float = 1.0,
+        # Energy parameters
+        E_stable: float = 0.0,
+        E_tipped: float = 0.5,
+        dissipation_rate: float = 0.1,
+        heat_capacity: float = 1.0,
+        effective_temperature: float = 1.0
+    ):
+        # Store asymmetric barriers before calling parent
+        self.barrier_tip = barrier_tip
+        self.barrier_recovery = barrier_recovery
+
+        # Parent init with average barrier (for compatibility)
+        # We override potential() to use asymmetric barriers
+        avg_barrier = (barrier_tip + barrier_recovery) / 2
+        super().__init__(
+            a=a, b=b, c=c, x_0=x_0,
+            E_stable=E_stable,
+            E_tipped=E_tipped,
+            barrier_height=avg_barrier,
+            dissipation_rate=dissipation_rate,
+            heat_capacity=heat_capacity,
+            effective_temperature=effective_temperature
+        )
+
+    @property
+    def asymmetry_ratio(self) -> float:
+        """Ratio of recovery to tip barrier (>1 means recovery is harder)."""
+        if self.barrier_tip > 0:
+            return self.barrier_recovery / self.barrier_tip
+        return float('inf')
+
+    def potential(self, x: float) -> float:
+        """
+        Compute asymmetric double-well potential energy at state x.
+
+        The potential has different curvatures on each side of the barrier:
+        - Left well (stable, x < 0): barrier_tip determines escape difficulty
+        - Right well (tipped, x > 0): barrier_recovery determines escape difficulty
+
+        This creates hysteresis: it's easier to tip than to recover.
+
+        Parameters
+        ----------
+        x : float
+            State variable
+
+        Returns
+        -------
+        float
+            Potential energy at state x
+        """
+        # Clip x to prevent overflow
+        x = np.clip(x, -10.0, 10.0)
+
+        # Piecewise potential with different barrier heights
+        if x < 0:
+            # Stable side: use barrier_tip
+            # Quadratic approximation near minimum at x = -1
+            # U(x) = barrier_tip * (x + 1)^2 for small deviations
+            # Transition to barrier at x = 0
+            # Scale so U(-1) = E_stable and U(0) = E_stable + barrier_tip
+            scale_tip = 4 * self.barrier_tip
+            U_norm = x**4 / 4 - x**2 / 2  # Minimum at x=-1 has U_norm = -0.25
+            U = scale_tip * (U_norm + 0.25) + self.E_stable
+        else:
+            # Tipped side: use barrier_recovery
+            # Scale so U(1) = E_tipped and U(0) = E_tipped + barrier_recovery
+            scale_rec = 4 * self.barrier_recovery
+            U_norm = x**4 / 4 - x**2 / 2  # Minimum at x=1 has U_norm = -0.25
+            U = scale_rec * (U_norm + 0.25) + self.E_tipped
+
+        return U
+
+    def force_from_potential(self, x: float) -> float:
+        """
+        Compute force from asymmetric potential.
+
+        F = -dU/dx
+
+        Parameters
+        ----------
+        x : float
+            State variable
+
+        Returns
+        -------
+        float
+            Force at state x
+        """
+        x = np.clip(x, -10.0, 10.0)
+
+        # Derivative of U_norm = x^4/4 - x^2/2 is x^3 - x
+        if x < 0:
+            scale = 4 * self.barrier_tip
+        else:
+            scale = 4 * self.barrier_recovery
+
+        return -scale * (x**3 - x)
+
+    def kramers_escape_rate_tip(self, noise_amplitude: float) -> float:
+        """
+        Kramers escape rate for tipping (stable → tipped).
+
+        Uses barrier_tip for the escape calculation.
+
+        Parameters
+        ----------
+        noise_amplitude : float
+            Effective temperature / noise strength
+
+        Returns
+        -------
+        float
+            Tipping rate (per unit time)
+        """
+        omega_a = np.sqrt(2 * 4 * self.barrier_tip)
+        omega_b = np.sqrt(4 * self.barrier_tip)
+        prefactor = (omega_a * omega_b) / (2 * np.pi * self.gamma)
+        exponent = -self.barrier_tip / noise_amplitude
+        return prefactor * np.exp(exponent)
+
+    def kramers_escape_rate_recovery(self, noise_amplitude: float) -> float:
+        """
+        Kramers escape rate for recovery (tipped → stable).
+
+        Uses barrier_recovery for the escape calculation.
+
+        Parameters
+        ----------
+        noise_amplitude : float
+            Effective temperature / noise strength
+
+        Returns
+        -------
+        float
+            Recovery rate (per unit time)
+        """
+        omega_a = np.sqrt(2 * 4 * self.barrier_recovery)
+        omega_b = np.sqrt(4 * self.barrier_recovery)
+        prefactor = (omega_a * omega_b) / (2 * np.pi * self.gamma)
+        exponent = -self.barrier_recovery / noise_amplitude
+        return prefactor * np.exp(exponent)
+
+    def expected_tip_recovery_ratio(self, noise_amplitude: float) -> float:
+        """
+        Expected ratio of tipping to recovery rates.
+
+        This predicts the hysteresis strength based on barrier asymmetry.
+
+        Parameters
+        ----------
+        noise_amplitude : float
+            Effective temperature / noise strength
+
+        Returns
+        -------
+        float
+            k_tip / k_recovery ratio (>1 means more tipping than recovery)
+        """
+        k_tip = self.kramers_escape_rate_tip(noise_amplitude)
+        k_rec = self.kramers_escape_rate_recovery(noise_amplitude)
+        if k_rec > 0:
+            return k_tip / k_rec
+        return float('inf')
+
+    def dxdt_diag(self):
+        """
+        Returns callable using force from asymmetric potential.
+
+        This overrides the parent cusp dynamics to use the asymmetric
+        barrier heights. The force is derived from -dU/dx where U has
+        different barrier heights on each side.
+
+        Returns
+        -------
+        callable
+            Function (t, x) -> dx/dt
+        """
+        return lambda t, x: self.force_from_potential(x)
+
+    def eval_dxdt(self, x: float, t: float = 0) -> float:
+        """
+        Evaluate dx/dt at state x using asymmetric force.
+
+        Parameters
+        ----------
+        x : float
+            State variable
+        t : float
+            Time (unused, for API compatibility)
+
+        Returns
+        -------
+        float
+            Rate of change dx/dt
+        """
+        return self.force_from_potential(x)
+
+    def get_all_params(self) -> Dict[str, Any]:
+        """Return all parameters including asymmetric barriers."""
+        params = super().get_all_params()
+        params['barrier_tip'] = self.barrier_tip
+        params['barrier_recovery'] = self.barrier_recovery
+        params['asymmetry_ratio'] = self.asymmetry_ratio
+        return params
+
+
+class HistoryDependentCusp(AsymmetricBarrierCusp):
+    """
+    Cusp element that tracks tipping history and degrades recovery capacity.
+
+    Models biodiversity loss: cells that have tipped before have reduced
+    ability to recover because species have been lost.
+
+    Parameters
+    ----------
+    history_penalty : float
+        Fractional increase in recovery barrier per previous tip (default 0.2)
+        e.g., 0.2 means each tip adds 20% to recovery barrier
+
+    Attributes
+    ----------
+    tip_count : int
+        Number of times this element has tipped
+    effective_barrier_recovery : float
+        Current recovery barrier including history penalty
+    """
+
+    def __init__(
+        self,
+        history_penalty: float = 0.2,
+        **kwargs
+    ):
+        super().__init__(**kwargs)
+        self.history_penalty = history_penalty
+        self.tip_count = 0
+        self._last_state_tipped = False
+
+    @property
+    def effective_barrier_recovery(self) -> float:
+        """Recovery barrier including accumulated history penalty."""
+        return self.barrier_recovery * (1 + self.history_penalty * self.tip_count)
+
+    def update_history(self, x: float) -> None:
+        """
+        Update tipping history based on current state.
+
+        Call this at each timestep to track state transitions.
+
+        Parameters
+        ----------
+        x : float
+            Current state variable
+        """
+        currently_tipped = x > 0
+
+        # Detect tip event (transition from stable to tipped)
+        if currently_tipped and not self._last_state_tipped:
+            self.tip_count += 1
+
+        self._last_state_tipped = currently_tipped
+
+    def reset_history(self) -> None:
+        """Reset tipping history to pristine state."""
+        self.tip_count = 0
+        self._last_state_tipped = False
+
+    def potential(self, x: float) -> float:
+        """
+        Compute potential with history-dependent recovery barrier.
+
+        Uses effective_barrier_recovery which increases with tip_count.
+        """
+        x = np.clip(x, -10.0, 10.0)
+
+        if x < 0:
+            scale_tip = 4 * self.barrier_tip
+            U_norm = x**4 / 4 - x**2 / 2
+            U = scale_tip * (U_norm + 0.25) + self.E_stable
+        else:
+            # Use EFFECTIVE barrier including history penalty
+            scale_rec = 4 * self.effective_barrier_recovery
+            U_norm = x**4 / 4 - x**2 / 2
+            U = scale_rec * (U_norm + 0.25) + self.E_tipped
+
+        return U
+
+    def force_from_potential(self, x: float) -> float:
+        """Compute force with history-dependent barrier."""
+        x = np.clip(x, -10.0, 10.0)
+
+        if x < 0:
+            scale = 4 * self.barrier_tip
+        else:
+            scale = 4 * self.effective_barrier_recovery
+
+        return -scale * (x**3 - x)
+
+    def get_all_params(self) -> Dict[str, Any]:
+        """Return all parameters including history state."""
+        params = super().get_all_params()
+        params['history_penalty'] = self.history_penalty
+        params['tip_count'] = self.tip_count
+        params['effective_barrier_recovery'] = self.effective_barrier_recovery
+        return params
