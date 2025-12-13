@@ -562,6 +562,161 @@ Week 3:
 
 ---
 
+## Experiment 15: Coupling Restoration Dynamics ⭐ NEW (Based on Exp 9 Findings)
+
+### Objective
+
+Test whether **restoring coupling strength** during recovery is more effective than direct cell forcing, given the finding that coupling degradation is the dominant hysteresis mechanism.
+
+### Scientific Rationale (From Experiment 9)
+
+Experiment 9 revealed a critical finding:
+- **Coupling degradation ALONE produces 100% recovery failure** (0% recovery)
+- Barrier asymmetry alone produces 68% reduction
+- Combined mechanisms produce 87-89% reduction
+
+This means coupling degradation is the **dominant** mechanism. Therefore, interventions that restore coupling may be more effective than direct forcing.
+
+**Physical Interpretation**:
+- Direct forcing = planting trees in individual cells
+- Coupling restoration = reforestation corridors that reconnect moisture recycling
+- Network hub restoration = protecting/restoring high-connectivity regions
+
+### Experimental Design
+
+**Protocol: Cascade → Intervention → Recovery**
+
+```
+Phase 1 (Cascade): t = 0 to 200
+  - Lévy α=1.5, σ=0.06
+  - State-dependent coupling degradation ACTIVE (factor=0.3)
+  - Trigger cascade (~50% tipped)
+
+Phase 2 (Intervention): t = 200 to 1000
+  - Gaussian α=2.0, σ=0.04 (recovery noise)
+  - Compare intervention strategies:
+```
+
+**Intervention Conditions**
+
+| Condition | Direct Forcing | Coupling Restoration | Target |
+|-----------|---------------|---------------------|--------|
+| No intervention | None | None | Baseline (Exp 9) |
+| Direct forcing only | f = -0.1 | None | All cells |
+| **Coupling restoration only** | None | Restore to 1.0 | All edges |
+| Hub coupling restoration | None | Restore to 1.0 | Top 10% betweenness edges |
+| Corridor restoration | None | Restore to 1.0 | East-West moisture pathways |
+| Combined (direct + coupling) | f = -0.05 | Restore to 0.6 | All |
+
+**Coupling Restoration Implementation**
+
+```python
+class RestorableCoupling(StateDependentCoupling):
+    """
+    Coupling that can be restored during recovery phase.
+
+    Parameters
+    ----------
+    base_conductivity : float
+        Normal coupling strength
+    degradation_factor : float
+        Multiplier when source is tipped (0.3 = 30% support)
+    restoration_factor : float
+        Target coupling during intervention (1.0 = full restoration)
+    restoration_rate : float
+        Rate at which coupling restores toward target
+    """
+
+    def restore(self, dt: float):
+        """Gradually restore coupling toward restoration_factor."""
+        current = self.get_effective_factor()
+        target = self.restoration_factor
+        self.effective_factor += self.restoration_rate * (target - current) * dt
+```
+
+**Simulation Parameters**
+
+| Parameter | Value |
+|-----------|-------|
+| Network | 50-cell Amazon subnetwork |
+| Conditions | 6 |
+| Runs per condition | 20 |
+| Total simulations | 120 |
+| Cascade duration | 200 time units |
+| Recovery duration | 800 time units |
+| Dask workers | 14 |
+
+### Metrics
+
+1. **Recovery fraction**: Primary outcome (compare to Exp 9 baseline of 6%)
+2. **Recovery efficiency**: Recovery fraction per unit intervention cost
+3. **Time to 50% recovery**: How quickly does intervention work?
+4. **Spatial recovery pattern**: Do hub interventions create spreading recovery?
+5. **Intervention cost**: Total forcing energy or coupling restoration effort
+
+### Expected Outcomes
+
+| Condition | Expected Recovery | Rationale |
+|-----------|-------------------|-----------|
+| No intervention | ~6% | Exp 9 baseline |
+| Direct forcing only | ~40% | From Exp 10c |
+| **Coupling restoration only** | **>50%?** | If coupling dominates, this should be highly effective |
+| Hub coupling restoration | ~40-60% | Targeted efficiency |
+| Corridor restoration | ~30-50% | Spatial realism |
+| Combined | >70% | Synergistic effects |
+
+### Key Questions
+
+1. **Is coupling restoration more efficient than direct forcing?**
+   - Compare recovery per unit cost
+
+2. **Does spatial targeting improve efficiency?**
+   - Hub restoration vs uniform restoration
+
+3. **Are there synergies between intervention types?**
+   - Combined > sum of parts?
+
+4. **How does restoration rate affect outcome?**
+   - Gradual vs immediate restoration
+
+### Implementation Notes
+
+```python
+def run_coupling_restoration_experiment(
+    network,
+    cascade_duration=200,
+    recovery_duration=800,
+    intervention_type='coupling',  # 'direct', 'coupling', 'combined'
+    restoration_target=1.0,        # For coupling restoration
+    restoration_rate=0.01,         # Gradual restoration
+    direct_forcing=-0.1,           # For direct forcing
+    target_edges='all',            # 'all', 'hubs', 'corridors'
+    n_runs=20
+):
+    """
+    Run experiment with coupling restoration intervention.
+    """
+```
+
+### Deliverables
+
+- [ ] `RestorableCoupling` class in couplings.py
+- [ ] Hub/corridor edge identification functions
+- [ ] Notebook 15: Coupling Restoration Dynamics
+- [ ] Comparison plot: intervention effectiveness
+- [ ] Cost-effectiveness analysis
+- [ ] Policy recommendations for Amazon restoration
+
+### Policy Implications
+
+If coupling restoration is more effective:
+1. **Prioritize forest corridors** over isolated reforestation
+2. **Protect moisture recycling pathways** even if cells are degraded
+3. **Target high-connectivity hubs** for maximum impact
+4. **Sequential strategy**: Restore coupling first, then direct forcing
+
+---
+
 ## Risk Assessment
 
 | Risk | Likelihood | Impact | Mitigation |
@@ -571,6 +726,7 @@ Week 3:
 | α-sweep shows no clear transition | Medium | Medium | Report gradual transition if found |
 | Keystone analysis inconclusive | Medium | Low | Focus on other experiments |
 | Computational time exceeds estimates | Medium | Low | Prioritize high-impact experiments |
+| Coupling restoration ineffective | Low | Medium | Still valuable negative result |
 
 ---
 
